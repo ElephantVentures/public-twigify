@@ -1,0 +1,511 @@
+<?php
+// $Id twigify.module 4/15/13 9:50 PM by johnvsc | jzavocki@elephantventures.com
+
+
+include_once('includes/FileHandler.php');
+include_once('includes/Twigify.php');
+/**
+ * Implementation of hook_init
+ */
+function twigify_init() {
+}
+
+/**
+ * Implementation of hook_node_view
+ */
+function twigify_node_view($node, $view_mode, $langcode) {
+
+}
+
+/**
+ * Helper function to return the
+ *
+ * @return mixed
+ */
+
+function  twigify_return_theme_cache() {
+  global $theme;
+  $cache = cache_get('theme_registry:' . $theme);
+  return $cache;
+}
+
+/**
+ * @return string
+ */
+function twigify_logo() {
+  $output = <<<EOT
+88888888888            d8b          d8b  .d888
+    888                Y8P          Y8P d88P"
+    888                                 888
+    888  888  888  888 888  .d88b.  888 888888 888  888
+    888  888  888  888 888 d88P"88b 888 888    888  888
+    888  888  888  888 888 888  888 888 888    888  888
+    888  Y88b 888 d88P 888 Y88b 888 888 888    Y88b 888
+    888   "Y8888888P"  888  "Y88888 888 888     "Y88888
+                                888                 888
+                           Y8b d88P            Y8b d88P
+                            "Y88P"              "Y88P"
+EOT;
+
+  return $output;
+
+}
+
+function twigify_EV_logo() {
+  $output = <<<EOT
+
+  Built for you by the engineers
+      at Elephant Ventures
+
+                            ?MMMM..
+      .+MMMMMMMMM .  ZMMM.   .  NMMM
+    ?MMM,.          .  ..MM.       MMM
+  :MM  . ZM+             .MM.      .MM$
+ MM       .MM.            .MM       .MM
+MM.        .MD             :MD       MM
+MM.         $M .MM.        .MM..    .MM.
+MM           M  MMM        .MM.     .MM
+,MM.          M  .M=       .MM,  .MMMM
+ =MM+         M,  MM        MM,  OMM .
+  .MMMM.       I  MM        MM.=MMM
+     :MMMM      . MM.      .MMMMD .
+       ..DMM.     MM.      .MMM
+           $MN.. .MMM      ZMMM=
+            . NM .MMM     .MM.MM.
+                . 8MM    .IM.. MN
+                 ..MMM.   MN   MM.
+                   .MMM. MM.   MN
+                   ..OMM..    8M
+                     .. MMMM
+                 .  .MM ..
+                  MMMM.
+                     .
+
+   http://www.elephantventures.com
+EOT;
+
+  return $output;
+
+}
+
+/** Modular Functions Used across Drush commands  */
+
+/**
+ *  Sets up default structure for the Twigify Class
+ */
+
+function twigify_init_twigify_class($theme_object) {
+  $twig = new Twigify();
+  $twig->init($theme_object);
+  $twig->updateThemeInfo();
+  return $twig;
+}
+
+/**
+ *  Option to Select what theme
+ */
+
+function twigify_select_theme() {
+
+  // assemble a list of themes
+  $all_themes     = list_themes();
+  $updated_themes = array();
+  //drush_print(print_r($all_themes));
+  drush_print('Your choices of themes to convert are:');
+  $i = 1;
+  foreach ($all_themes as $key => $value) {
+    $value->number   = $i;
+    $value->filepath = getcwd() . '/' . str_replace('/' . $value->name . '.info', '', $value->filename);
+    drush_print('                           ' . $i . '. ' . $key);
+    $updated_themes[$i] = $value;
+    $i++;
+  }
+  $choice = drush_prompt('Please enter the number from the list above');
+
+  //drush_print(print_r($values));
+  (int) $choice;
+  if (isset($updated_themes[$choice])) {
+    //drush_print(print_r($updated_themes[$choice]));
+    return $updated_themes[$choice];
+  }
+  else {
+    drush_print('Your choices did not match any from the list:');
+    twigify_select_theme();
+  }
+
+}
+
+/**
+ * Provides the Drush functionality to capture and process the new theme name
+ *
+ * @param $twig
+ *
+ */
+function twigify_process_new_theme_name(&$twig) {
+  if (!$twig->getNewThemeName()) {
+    $new_theme_name = drush_prompt('Enter a new name for your theme');
+  }
+  // format theme name
+  $new_theme_name = preg_replace("/[^[:alnum:]]/","_",$new_theme_name);
+  drush_print('      "' . $new_theme_name . '" is the name of your new theme.');
+
+  if (drush_prompt('Is this acceptable? (y/n)') == 'y') {
+    $twig->setNewThemeName($new_theme_name);
+  }
+  else {
+    twigify_process_new_theme_name($twig);
+  }
+}
+
+/**
+ * Helper function that takes the name of a loaded function
+ * and returns it as a string for processing
+ *
+ * @param $function_name
+ *
+ * @return string
+ */
+function twigify_return_function_as_string($function_name) {
+  $func       = new ReflectionFunction($function_name);
+  $filename   = $func->getFileName();
+  $start_line = $func->getStartLine() - 1;   // -1 to convert line number to array index (1 base to 0 base)
+  $end_line   = $func->getEndLine() - 1;     // -1 to convert line number to array index (1 base to 0 base)
+  $length     = $end_line - $start_line + 1; // +1 for integer differnce (inclusive)
+  $source     = file($filename);
+  $result     = implode("", array_slice($source, $start_line, $length));
+  return $result;
+}
+
+/**
+ *  scans to see if the new theme directory exists
+ *  if it does not, prompts to create one
+ */
+
+function twigify_create_new_theme_directory(&$twig, &$fh) {
+  if (!$fh->doesExist($twig->getNewThemeDirectory())) {
+    drush_print('First, Twigify needs to create a new theme folder for "' . $twig->getNewThemeName() . '",');
+    if (drush_prompt('would you like some information to help you create the directory? (y/n)') == 'y') {
+      drush_print(" ");
+      drush_print("---> In Drupal 8, ALL themes will go into this directory:");
+      drush_print("    '<site_root>/themes' folder.");
+      drush_print(" ");
+      drush_print("---> Your Current Working Directory (cwd) is: ");
+      drush_print("     " . getcwd());
+      drush_print(" ");
+      drush_print("---> With the information above and using an absolute path,");
+    }
+    $twig->setNewThemeDirectory(drush_prompt('     Enter the parent directory where your new theme will live') . '/' . $twig->getNewThemeName());
+    $fh->createDirectory($twig->getNewThemeDirectory());
+    drush_print(print_r($twig->getNewThemeDirectory()));
+    drush_print(print_r($twig->getOldThemeDirectory()));
+    drush_print("CREATED DIRECTORY: " . $fh->getFileDirectory());
+  }
+}
+
+/**
+ * Provides the Drush functionality to take the user selected
+ * source theme directory and copies to the
+ * user specified new parent directory
+ *
+ * Along the way, we inspect the structure of the theme dir to use
+ * when updating and augmenting the theme's files.
+ *
+ * This is a hella lot easier than trying to traverse directories!
+ *
+ * @param $twig
+ * @param $fh
+ */
+function twigify_copy_theme_to_new_theme_directory(&$twig, &$fh) {
+  // once we create the new Directory, lets copy over files!
+  $fh->copyDirectory($twig->getOldThemeDirectory(), $twig->getNewThemeDirectory());
+  drush_print(" ... Created copies of original files into new theme directory," . $twig->getNewThemeDirectory() . " :");
+  // save a map of this directory
+  $fh->mapDirectoryStructure($twig->getNewThemeDirectory());
+  $twig->setNewDirectoryStructure($fh->getMappedDirectoryStructure());
+  $twig->processThemeExtensions();
+  //drush_print_r($twig->getNewDirectoryStructure());
+  drush_print(" ... Mapped new theme directory structure.");
+}
+
+/**
+ *  Provides the Drush functionality to see if info file exists
+ *  if it does not, prompts to create one
+ *
+ * @param $twig
+ * @param $fh
+ */
+function twigify_create_info_file(&$twig, &$fh) {
+  // create an info file in directory
+  // check if exists
+  $info_file_path = $twig->getNewThemeDirectory() . '/' . $twig->getNewThemeName() . '.info';
+  if (!$fh->doesExist($info_file_path)) {
+    drush_print("---> We have detected that you do not have a theme info file yet.");
+    if (drush_prompt('Would you like to create a theme info file? (y/n)') == 'y') {
+      // create an info file
+      $new_info_file = new FileHandler();
+      $new_info_file->setFilePath($info_file_path . '.yml');
+      $new_info_file->setFileData($twig->assembleNewInfoFile());
+      $new_info_file->saveFileData();
+      drush_print($new_info_file->getFilePath() . ' has been created.');
+      //drush_print($old_info_file_path . ' has been deleted.');
+    }
+    if (drush_prompt('Would you like to remove the old info file (y/n)') == 'y') {
+      // create an new object to handle the info file
+      // remember this is still in the new theme dir!
+      $old_info_file = $twig->getNewThemeDirectory() . '/' . $twig->getOldThemeName() . '.info';
+      $old_info_fh   = new FileHandler();
+      $old_info_fh->init($old_info_file);
+      $old_info_fh->deleteFile();
+      unset($old_info_fh);
+      drush_print($old_info_file . ' has been deleted.');
+    }
+  }
+
+}
+
+/**
+ * Provides the Drush functionality to scan the directory for tpls
+ *  converts them to tpl.twig
+ *  print the converted path
+ *
+ * @param $twig
+ * @param $fh
+ */
+function twigify_process_tpls(&$twig, &$fh) {
+
+  $newThemeDirectoryMap = $twig->getNewDirectoryStructure();
+  $tpls                 = $newThemeDirectoryMap['tpl'];
+  if (!empty($tpls)) {
+
+
+    drush_print("Twigify found these template files:");
+
+    foreach ($tpls as $value) {
+      if (isset($value)) {
+        drush_print('     ' . $value);
+      }
+    }
+    if (drush_prompt('Do you want to Twigify the above files? (y/n)') == 'y') {
+      foreach ($tpls as $value) {
+        if (isset($value)) {
+          // get the file into memory
+          $fh->init($twig->getNewThemeDirectory() . '/' . $value);
+          $fh->extractFileContents();
+          // here we can pass the file contents to the Twigify
+          // twigify it
+          $twig->setFileData($fh->getFileData());
+          $twig->convertToTwig();
+          // save the file with new data
+          $fh->setFileData($twig->getFileData());
+          $fh->deleteFile();
+          $fh->replaceExtension('tpl.php', 'html.twig');
+          $fh->openFile();
+          $fh->writeFile();
+          $fh->closeFile();
+          //drush_print($fh->getFilePath());
+          drush_print('-----> Converted ' . $fh->getFilePath());
+          // get the
+        }
+      }
+    }
+  }
+  else {
+    drush_print('No TPLs were found!');
+  }
+
+}
+
+
+/**
+ * Provides the Drush functionality to scan the template.php file to functions
+ *  converts hooks into preprocessing  tpl.twig
+ *  updates the functions in the template file
+ *  and saves out a new template.php file in the new theme directory
+ *
+ * @param $twig
+ * @param $fh
+ */
+function twigify_process_theme_functions(&$twig, &$fh) {
+
+  //get path to template.php
+  //drush_print_r($twig->getThemeData());
+  $pathToNewThemeDirectory    = $twig->getNewThemeDirectory();
+  $newThemeDirectoryStructure = $twig->getNewDirectoryStructure();
+  $newTemplatePHP             = $pathToNewThemeDirectory . '/template.php';
+  //drush_print_r($newTemplatePHP);
+  if (file_exists($newTemplatePHP)) {
+    // we need to remove the  recently copied but "old content" template.php because we will
+    // be writing a new one at the end of this function!
+    unlink($newTemplatePHP);
+
+    $oldThemeName = $twig->getOldThemeName();
+    $newThemeName = $twig->getNewThemeName();
+    $output       = "<?php \n";
+    // get a desegregated list of theme functions
+    $segregated_functions = twigify_return_segregated_theme_functions_list()[$oldThemeName];
+    drush_print('Twigify found these theme functions:');
+    drush_print('Template.php theme functions / preprocessors:');
+    foreach ($segregated_functions['not_theme_hooks'] as $nth) {
+      drush_print('                ' . $nth);
+    }
+    drush_print('"hook_theme" overrides:');
+    foreach ($segregated_functions['theme_hooks'] as $th) {
+      drush_print('                ' . $th);
+    }
+    if (drush_prompt("Would you like to process them? (y/n)") == 'y') {
+
+      // cycle through preprocessing functions
+      if (!empty($segregated_functions['not_theme_hooks'])) {
+        foreach ($segregated_functions['not_theme_hooks'] as $nthk => $nthv) {
+          $output .= twigify_create_comment_block(str_replace($oldThemeName, $newThemeName, $nthv));
+          $output .= "\n";
+          $output .= str_replace($oldThemeName, $newThemeName, twigify_return_function_as_string($nthv));
+          $output .= "\n";
+          drush_print('-----> Updated: ' . str_replace($oldThemeName, $newThemeName, $nthv));
+        }
+      }
+      // cycle through theme functions
+      if (!empty($segregated_functions['theme_hooks'])) {
+        // make a "templates" directory if there isn't one already
+
+        if (!$fh->doesExist($pathToNewThemeDirectory . '/templates')) {
+          mkdir($pathToNewThemeDirectory . '/templates');
+        }
+        // make sure it is writable!
+        $fh->chmodDirectory($pathToNewThemeDirectory . '/templates');
+
+        foreach ($segregated_functions['theme_hooks'] as $thk => $thv) {
+          $functionInfo = twig_build_preprocess_function(twigify_return_function_as_string($thv), $thk, $oldThemeName, $newThemeName);
+          $output .= $functionInfo['function_text'];
+          $output .= "\n";
+          // the new function and template names
+          $newFunctionName = $functionInfo['function_name'];
+          $newTemplateName = $functionInfo['template_name'];
+          drush_print('-----> Created: ' . $newFunctionName);
+
+          // now we have to add the actual template file
+          $new_file_contents = <<<EOM
+{#
+/**
+ * @file
+ * Default theme implementation to <<insert what this file does>>.
+ *
+ * Available variables:
+ *   << explain variables here, if any >>
+ *
+ * @see template_preprocess()
+ * @see $newFunctionName()
+ *
+ * @ingroup themeable
+ */
+#}
+
+EOM;
+          $new_file_contents .= '{{ ' . $functionInfo['template_token'] . ' }}';
+          $new_file = $pathToNewThemeDirectory . '/templates/' . $newTemplateName;
+          $handle = fopen($new_file, 'w') or die('Cannot open file:  ' . $new_file);
+          fwrite($handle, $new_file_contents);
+
+          drush_print('-----> Saved to:  "' . $new_file);
+        }
+      }
+      //add theme functions to the new template.php
+      $new_template_file_handle = fopen($newTemplatePHP, 'w') or die('Cannot open file:  ' . $newTemplatePHP);
+      fwrite($new_template_file_handle, $output);
+      drush_print('Created: "' . $newTemplatePHP);
+      // save and close
+    }
+  }
+  else {
+    // TODO -> accommodate for themes with inc files !
+    drush_print("It seems that this theme does not have a template.php to convert");
+  }
+
+}
+
+
+/**
+ * Provides a generic version of the new fangeld comment block
+ *
+ * @param $function_name
+ *
+ * @return string
+ */
+function  twigify_create_comment_block($function_name) {
+  $header = <<<EOHEADER
+/**
+ * Implementation of $function_name function.
+ *
+ * @param array <<any params>>
+ *   <<describe the params and what they do here>>
+ */
+EOHEADER;
+  return $header;
+}
+
+/**
+ * Jims super do it all function that captures all relevant theme functions
+ * and segregates them into two buckets of
+ * "theme hooks" and "not theme hooks"
+ *
+ * @return array
+ */
+function twigify_return_segregated_theme_functions_list() {
+  // get all the installed themes; we need it both to list them, and to pass to _drupal_theme_initialize()
+  $themes = list_themes();
+
+  // we need to mess with the globals to get _drupal_theme_initialize and _theme_load_registry (I think; YMMV)
+  global $theme, $theme_key;
+
+  // loop over all available themes and build a list of available functions
+  $themeFunctionList = array();
+  foreach ($themes as $themeName => $themeInfoObject) {
+    // set the theme and theme_key
+    $theme     = $themeName;
+    $theme_key = $theme; // Store the identifier for retrieving theme settings with.
+
+    // Find all our ancestor themes and put them in an array.
+    $base_theme = array();
+    $ancestor   = $theme;
+    while ($ancestor && isset($themes[$ancestor]->base_theme)) {
+      $ancestor     = $themes[$ancestor]->base_theme;
+      $base_theme[] = $themes[$ancestor];
+    }
+
+    // initialize Drupal internals for the chosen theme
+    _drupal_theme_initialize($themeInfoObject, array_reverse($base_theme));
+
+    // try to get the registry; NB: theme_get_registry() re-initializes the theme so we can't use it directly
+    list($callback, $arguments) = _theme_registry_callback();
+    $themeRegistry = call_user_func_array($callback, $arguments); // this would be the result of theme_get_registry() if seven were the current theme
+
+    // we'll track two lists: functions in the theme that are theme hooks, and functions that aren't
+    $themeFunctionList[$themeName] = array('theme_hooks' => array(), 'not_theme_hooks' => array());
+
+    // find all the theme's theme hooks in the registry
+    $themeHookList = array();
+    foreach ($themeRegistry as $registryKey => $registryItem) {
+
+      // if $registryItem['function'] is set, this is a theme hook
+      // if the function name starts with the theme name, it's one of ours
+      // FIXME? we should also check that $registryItem['theme path'] === dirname($themeInfoObject['filename'])??? that's the location of the theme's .info file
+      if (isset($registryItem['function']) && $themeName . '_' . $registryKey === $registryItem['function']) {
+        $themeHookList[$registryKey] = $registryItem['function'];
+      }
+    }
+    $themeFunctionList[$themeName]['theme_hooks'] = $themeHookList;
+
+    // get a list of all PHP functions that match this theme's namespace (NB: we'll miss non-conventionally named helper functions)
+    // note: this *must* come after bootstrapping in the theme; otherwise the theme's functions won't be defined in PHP
+    $themeFunctions = array_filter(get_defined_functions()['user'], function ($item) use ($themeName) {
+      return preg_match("/^_?{$themeName}_/", $item);
+    });
+    // filter out the theme hooks we've already found
+    $themeFunctionList[$themeName]['not_theme_hooks'] = array_filter($themeFunctions, function ($item) use ($themeHookList) {
+      return !in_array($item, $themeHookList);
+    });
+  }
+
+  // return the list
+  return $themeFunctionList;
+}

@@ -1,0 +1,5 @@
+name = "Twigify"
+description = Provides Themers assistence when porting a non-twig theme over to a Twig theme.
+package = Theme Tools
+core = 7.x
+version = "7.x-alpha"
