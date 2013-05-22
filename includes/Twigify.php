@@ -173,6 +173,7 @@ class Twigify {
       $new_info_file['description'] = 'New Drupal 8 Twig Theme created with the help of Twigify.';
       // $new_info_file['base theme']  = $subtheme->base;
       $new_info_file['engine']     = 'twig';
+      $new_info_file['type']       = 'theme';      
       $new_info_file['core']       = '8.x';
       $new_info_file['version']    = '8.x';
       $new_info_file['screenshot'] = 'screenshot.png';
